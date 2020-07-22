@@ -1,5 +1,6 @@
 const sodium = require('sodium-native')
 const assert = require('assert')
+const codecs = require('codecs')
 
 module.exports = encoder
 module.exports.encryptionKey = encryptionKey
@@ -9,8 +10,7 @@ function encoder (encryptionKey, opts = {}) {
   assert(Buffer.isBuffer(encryptionKey), 'encryption key must be a buffer')
   assert(encryptionKey.length === sodium.crypto_stream_KEYBYTES, `cobox-crypto: key must be a buffer of length ${sodium.crypto_stream_KEYBTES}`)
 
-  opts.valueEncoding = _resolveStringEncoder(opts.valueEncoding)
-
+  const defaultEncoder = codecs(opts.valueEncoding)
   const nonce = opts.nonce || generateNonce()
   // TODO use separate nonce for rx and tx? hypercore protocol does this
   const tx = sodium.crypto_stream_xor_instance(nonce, encryptionKey)
@@ -26,40 +26,21 @@ function encoder (encryptionKey, opts = {}) {
     return data
   }
 
-  return (opts.valueEncoding && typeof opts.valueEncoding.encode === 'function')
-    ? { // Run originally provided encoder
-      encode (message, buffer, offset) {
-        return encode(opts.valueEncoding.encode(message, buffer, offset))
-      },
-      decode (ciphertext, start, end) {
-        return opts.valueEncoding.decode(decode(ciphertext), start, end)
-      },
-      nonce
-    }
-    : { encode, decode, nonce }
+  return {
+    encode (message, buffer, offset) {
+      return encode(defaultEncoder.encode(message, buffer, offset))
+    },
+    decode (ciphertext, start, end) {
+      return defaultEncoder.decode(decode(ciphertext), start, end)
+    },
+    nonce
+  }
 }
 
 function encryptionKey () {
   const key = sodium.sodium_malloc(sodium.crypto_stream_KEYBYTES)
   sodium.randombytes_buf(key)
   return key
-}
-
-function _resolveStringEncoder (encoder) {
-  if (encoder === 'json') {
-    return {
-      encode: (msg) => Buffer.from(JSON.stringify(msg)),
-      decode: (msg) => JSON.parse(msg.toString())
-    }
-  }
-
-  if ((encoder === 'utf-8') || (encoder === 'utf8')) {
-    return {
-      encode: (msg) => Buffer.from(msg),
-      decode: (msg) => msg.toString()
-    }
-  }
-  return encoder
 }
 
 function generateNonce () {
